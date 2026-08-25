@@ -185,11 +185,18 @@ func TestAuthFilePath(t *testing.T) {
 			t.Errorf("AuthFilePath = %q, want %q", got, home+"/.Xauthority")
 		}
 	}
-	// With no home either, there is simply no authority file.
+	// With no home either, there is simply no authority file. os.UserHomeDir
+	// reads a different variable per platform -- HOME on unix, USERPROFILE on
+	// windows, home on plan9 -- so all three are cleared: clearing only HOME
+	// left this branch unreached on the windows lane, and an untested branch
+	// that only one platform skips is exactly what a 100% gate exists to catch.
 	t.Setenv("HOME", "")
-	if home, err := os.UserHomeDir(); err != nil || home == "" {
-		if got := AuthFilePath(); got != "" {
-			t.Errorf("AuthFilePath with no HOME = %q, want empty", got)
-		}
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("home", "")
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		t.Fatalf("clearing every home variable still left a home directory %q", home)
+	}
+	if got := AuthFilePath(); got != "" {
+		t.Errorf("AuthFilePath with no home = %q, want empty", got)
 	}
 }

@@ -91,6 +91,13 @@ jobs:
   windows:
     name: windows (stubs + the whole codec)
     runs-on: windows-latest
+    # Every step here runs under bash. PowerShell is the default on a windows
+    # runner and it re-tokenises `-coverprofile=cover.out ./...` into two
+    # package arguments, so the run fails on a package named ".out" that no
+    # amount of Go code can fix.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -99,7 +106,6 @@ jobs:
       - run: go vet ./...
       - run: go test -count=1 -coverprofile=cover.out ./...
       - name: 100% coverage gate
-        shell: bash
         run: ./.github/coverage-gate.sh cover.out
 
   # Every target a consumer builds for must compile, including the ones with no
