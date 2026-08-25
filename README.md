@@ -17,7 +17,7 @@ specification.
 
 ## Scope — deliberately, the bytes and nothing above them
 
-This package stops at the byte stream. It has **no request table, no event
+This package stops at the byte stream. It has **no connection type, no event
 loop and no opinion about what a client does with a connection**, because the
 two things clients do with one — pump events for a window, or pull frames for a
 capture — want genuinely different request/reply machines over the same socket.
@@ -29,8 +29,36 @@ connection type over [`Handshake`]'s result.
 | `Encoder` / `Decoder` — the wire codec, both byte orders, every read bounds-checked | request/reply/event demultiplexing |
 | `LoadAuthCookie`, `ParseXauthority` — MIT-MAGIC-COOKIE-1 from `$XAUTHORITY` | window creation, mapping, properties |
 | `Handshake` + `Setup` — the setup exchange and its full reply (formats, screens, depths, visuals) | keysym / keyboard mapping |
-| `Segment` — an anonymous shared-memory region, mapped, for MIT-SHM | the MIT-SHM, RANDR, XFIXES, Present request encodings |
+| `Monitors` — the displays inside a screen, over RANDR 1.5 / XINERAMA, with their EDID model names | the MIT-SHM, XFIXES, Present request encodings |
+| `Segment` — an anonymous shared-memory region, mapped, for MIT-SHM | mode setting, output configuration, `xrandr`'s write side |
 | `WrapUnix` / `DialUnix` — the unix transport, `SCM_RIGHTS` fd passing, readability waiting | `DISPLAY` parsing and socket-path search |
+
+### The one thing above the bytes: `Monitors`
+
+An X screen is one coordinate space, and the physical displays are laid out
+inside it. Both consumers need that layout — a capture to grab the left-hand
+panel, a toolkit to put a window full-screen on the right one — and the answer
+does not depend on what the client is *for*, which is exactly what makes a
+second copy of it pure duplication.
+
+So it lives here, and it does not need a connection type to do its job: it asks
+through `Requester`, two methods (`Order`, `Request`) that any request/reply
+machine already has.
+
+```go
+mons, err := x11.Monitors(conn, setup.ScreenOf(0)) // conn is your own type
+for _, m := range mons {
+    fmt.Println(m.DisplayName(), m.Width, m.Height, m.X, m.Y, m.Primary)
+}
+```
+
+`Name` is the connector RANDR reports (`HDMI-1`, `DP-2`); `Model` is the
+display's own product name read out of its **EDID** (`VITURE Beast`), which is
+the field to use when an application has to recognise a particular panel rather
+than a particular socket. `DisplayName` prefers the model and falls back to the
+connector. RANDR 1.5 is tried first, then XINERAMA, then the whole screen as a
+single nameless monitor — a server that offers neither still gets an answer,
+and the list is never empty.
 
 ## Transport-agnostic on purpose
 
@@ -101,7 +129,7 @@ go test -coverprofile=cover.out ./... && ./.github/coverage-gate.sh cover.out
 ## Consumers
 
 - [`go-freedesktop/screencast`](https://github.com/go-freedesktop/screencast) — X11 screen capture (RANDR, XFIXES, MIT-SHM `GetImage`)
-- [`go-widgets/window`](https://github.com/go-widgets/window) — the toolkit's X11 windowing back-end (windows, events, clipboard, MIT-SHM `PutImage`)
+- [`go-widgets/window`](https://github.com/go-widgets/window) — the toolkit's X11 windowing back-end (windows, events, clipboard, MIT-SHM `PutImage`, `Screens`)
 
 ## License
 

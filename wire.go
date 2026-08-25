@@ -8,11 +8,17 @@
 // and its reply, the anonymous shared-memory segment MIT-SHM attaches, and the
 // unix-domain transport that hands the server a descriptor over SCM_RIGHTS.
 //
-// It deliberately stops there. It has no request table, no event loop and no
+// It deliberately stops there. It has no connection type, no event loop and no
 // opinion about what a client does with a connection: a screen capture and a
 // window toolkit want very different request/reply machines on top of the same
 // bytes, and this package is the bytes. A consumer builds its own connection
 // type over [Handshake]'s result.
+//
+// The one exception is [Monitors], which enumerates the displays laid out
+// inside an X screen over RANDR and XINERAMA. It is here because the answer
+// does not depend on what the client is FOR — a capture and a toolkit want the
+// same rectangles — and it does not need a connection type to give it: it asks
+// through [Requester], two methods any request/reply machine already has.
 //
 // Everything above the socket is transport-agnostic: [Handshake] takes any
 // io.ReadWriteCloser, so the whole codec is exercisable in-process over a
