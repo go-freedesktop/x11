@@ -1,0 +1,163 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  # A workflow that fails to PARSE reports nothing at all: no red cross, no
+  # run, just silence. actionlint is what turns that silence into a failure.
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          "$(go env GOPATH)/bin/actionlint" -color
+
+  gofmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files are not gofmt-clean:"; echo "$unformatted"
+            exit 1
+          fi
+      - name: go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod
+
+  # Linux is where the real syscalls are: an unlinked file on a tmpfs mapped
+  # MAP_SHARED, and SCM_RIGHTS over a real unix socket. Both are exercised
+  # against the kernel, not against a stub.
+  linux:
+    name: linux (real syscalls)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go vet ./...
+      - run: go build ./...
+      - name: Unit tests
+        run: go test -count=1 -coverprofile=cover.out ./...
+      - name: 100% coverage gate
+        shell: bash
+        run: ./.github/coverage-gate.sh cover.out
+      - name: Race (CGO=1)
+        run: go test -race -count=1 ./...
+        env:
+          CGO_ENABLED: "1"
+
+  # darwin and windows are not an afterthought: the whole codec is portable and
+  # is exercised here against an in-process scripted server, so a protocol bug
+  # shows up on a machine that has never seen an X server. windows is also the
+  # only lane that builds the no-unix-socket transport stub.
+  darwin:
+    name: darwin (unix transport + the whole codec)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go vet ./...
+      - run: go test -count=1 -coverprofile=cover.out ./...
+      - name: 100% coverage gate
+        shell: bash
+        run: ./.github/coverage-gate.sh cover.out
+
+  windows:
+    name: windows (stubs + the whole codec)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go vet ./...
+      - run: go test -count=1 -coverprofile=cover.out ./...
+      - name: 100% coverage gate
+        shell: bash
+        run: ./.github/coverage-gate.sh cover.out
+
+  # Every target a consumer builds for must compile, including the ones with no
+  # unix socket at all: a toolkit cross-compiles this without thinking about it.
+  cross:
+    name: cross ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: linux, goarch: riscv64 }
+          - { goos: linux, goarch: loong64 }
+          - { goos: linux, goarch: ppc64le }
+          - { goos: linux, goarch: s390x }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+          - { goos: freebsd, goarch: amd64 }
+          - { goos: android, goarch: arm64 }
+          - { goos: js, goarch: wasm }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go build ./...
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+      - run: go vet ./...
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+
+  # The wire order is the CLIENT's choice, and both halves of that choice have
+  # to work on a machine whose own order is the other one. s390x under qemu is
+  # where the big-endian path is actually executed rather than merely compiled.
+  arch-qemu:
+    name: arch ${{ matrix.goarch }} (qemu)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goarch: s390x, qemu: qemu-s390x-static }
+          - { goarch: ppc64le, qemu: qemu-ppc64le-static }
+          - { goarch: riscv64, qemu: qemu-riscv64-static }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user-static
+      - name: Test under qemu (${{ matrix.goarch }})
+        run: go test -exec=${{ matrix.qemu }} -count=1 ./...
+        env:
+          GOARCH: ${{ matrix.goarch }}
