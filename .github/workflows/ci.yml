@@ -157,6 +157,7 @@ jobs:
           - { goarch: s390x, qemu: qemu-s390x-static }
           - { goarch: ppc64le, qemu: qemu-ppc64le-static }
           - { goarch: riscv64, qemu: qemu-riscv64-static }
+          - { goarch: loong64, qemu: qemu-loongarch64-static }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
